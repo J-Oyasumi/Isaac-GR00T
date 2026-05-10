@@ -11,7 +11,21 @@ warn()  { echo -e "${YELLOW}[setup]${NC} $*"; }
 ok()    { echo -e "${GREEN}[setup]${NC} $*"; }
 fail()  { echo -e "${RED}[setup]${NC} $*" >&2; exit 1; }
 
-REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
+# Resolve REPO_ROOT — same logic as train.sh (SLURM-safe, no hard git dep).
+if [ -z "${REPO_ROOT:-}" ]; then
+    if [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -d "$SLURM_SUBMIT_DIR/examples/realworld" ]; then
+        REPO_ROOT="$SLURM_SUBMIT_DIR"
+    else
+        _src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _src_dir=""
+        if [ -n "$_src_dir" ] && _gt="$(git -C "$_src_dir" rev-parse --show-toplevel 2>/dev/null)"; then
+            REPO_ROOT="$_gt"
+        elif [ -n "$_src_dir" ] && [ -d "$_src_dir/../../examples/realworld" ]; then
+            REPO_ROOT="$(cd "$_src_dir/../.." && pwd)"
+        fi
+    fi
+fi
+[ -n "${REPO_ROOT:-}" ] && [ -d "$REPO_ROOT/examples/realworld" ] \
+    || fail "cannot resolve REPO_ROOT. cd to the repo root first, or export REPO_ROOT=/path/to/Isaac-GR00T"
 cd "$REPO_ROOT"
 log "repo root: $REPO_ROOT"
 

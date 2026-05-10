@@ -10,8 +10,24 @@ warn() { echo -e "${YELLOW}[train]${NC} $*"; }
 ok()   { echo -e "${GREEN}[train]${NC} $*"; }
 fail() { echo -e "${RED}[train]${NC} $*" >&2; exit 1; }
 
-REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
+# Resolve REPO_ROOT — SLURM copies sbatch scripts to a spool dir, so BASH_SOURCE
+# and `git` won't find the repo. Priority: env var > SLURM_SUBMIT_DIR > git > script's grandparent.
+if [ -z "${REPO_ROOT:-}" ]; then
+    if [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -d "$SLURM_SUBMIT_DIR/examples/realworld" ]; then
+        REPO_ROOT="$SLURM_SUBMIT_DIR"
+    else
+        _src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _src_dir=""
+        if [ -n "$_src_dir" ] && _gt="$(git -C "$_src_dir" rev-parse --show-toplevel 2>/dev/null)"; then
+            REPO_ROOT="$_gt"
+        elif [ -n "$_src_dir" ] && [ -d "$_src_dir/../../examples/realworld" ]; then
+            REPO_ROOT="$(cd "$_src_dir/../.." && pwd)"
+        fi
+    fi
+fi
+[ -n "${REPO_ROOT:-}" ] && [ -d "$REPO_ROOT/examples/realworld" ] \
+    || fail "cannot resolve REPO_ROOT. submit sbatch from repo root, or export REPO_ROOT=/path/to/Isaac-GR00T"
 cd "$REPO_ROOT"
+log "repo root: $REPO_ROOT"
 
 DATASET="examples/realworld/realworld_lerobot"
 CONFIG="examples/realworld/realworld_config.py"
