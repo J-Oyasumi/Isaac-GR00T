@@ -1,3 +1,4 @@
 realworld_lerobot/
 __pycache__/
 *.pyc
+.ffmpeg_prefix

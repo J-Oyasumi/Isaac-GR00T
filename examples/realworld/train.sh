@@ -36,6 +36,16 @@ export MASTER_PORT="${MASTER_PORT:-29500}"
 [ -f "$DATASET/meta/stats.json" ]    || fail "missing $DATASET/meta/stats.json — regenerate stats first"
 [ -f "$CONFIG" ]          || fail "missing modality config: $CONFIG"
 
+# ── ffmpeg runtime libs from conda env (torchcodec needs libavformat etc.)
+if [ -z "${CONDA_FFMPEG_PREFIX:-}" ] && [ -f "$REPO_ROOT/examples/realworld/.ffmpeg_prefix" ]; then
+    CONDA_FFMPEG_PREFIX="$(cat "$REPO_ROOT/examples/realworld/.ffmpeg_prefix")"
+fi
+[ -n "${CONDA_FFMPEG_PREFIX:-}" ] || fail "CONDA_FFMPEG_PREFIX not set — run setup_env.sh first or export it"
+[ -d "$CONDA_FFMPEG_PREFIX/lib" ] || fail "no $CONDA_FFMPEG_PREFIX/lib"
+export LD_LIBRARY_PATH="$CONDA_FFMPEG_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+export PATH="$CONDA_FFMPEG_PREFIX/bin:$PATH"
+log "ffmpeg libs: $CONDA_FFMPEG_PREFIX/lib"
+
 if [ "$USE_WANDB" = 1 ]; then
     if [ -z "${WANDB_API_KEY:-}" ] && ! grep -q "api.wandb.ai" "$HOME/.netrc" 2>/dev/null; then
         fail "USE_WANDB=1 but wandb not logged in. run:  uv run wandb login   (or set WANDB_API_KEY)"

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # One-shot env setup for realworld GR00T finetuning on a dGPU server.
-# Assumes: repo already cloned, run from anywhere inside the repo, sudo for apt.
+# Assumes: repo cloned, uv already installed, no sudo.
+# ffmpeg runtime libs come from a conda env (default: ffmpeg-libs);
+# override with: CONDA_FFMPEG_PREFIX=/path/to/envs/<name>
 set -euo pipefail
 
 CYAN='\033[1;36m'; YELLOW='\033[1;33m'; GREEN='\033[1;32m'; RED='\033[1;31m'; NC='\033[0m'
@@ -13,21 +15,26 @@ REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 log "repo root: $REPO_ROOT"
 
-# Sudo only when not root
-SUDO=""
-[ "$(id -u)" -ne 0 ] && SUDO="sudo"
-
-# ── system deps: ffmpeg (torchcodec runtime), libaio-dev (deepspeed async I/O)
-log "installing system deps (ffmpeg, libaio-dev)"
-$SUDO apt-get update -qq
-$SUDO apt-get install -y --no-install-recommends ffmpeg libaio-dev
+# ── locate ffmpeg-libs conda env (no apt, no sudo)
+FFMPEG_ENV_NAME="${FFMPEG_ENV_NAME:-ffmpeg-libs}"
+if [ -z "${CONDA_FFMPEG_PREFIX:-}" ]; then
+    if command -v conda &>/dev/null; then
+        CONDA_FFMPEG_PREFIX="$(conda info --base)/envs/$FFMPEG_ENV_NAME"
+    elif [ -d "$HOME/miniconda3/envs/$FFMPEG_ENV_NAME" ]; then
+        CONDA_FFMPEG_PREFIX="$HOME/miniconda3/envs/$FFMPEG_ENV_NAME"
+    elif [ -d "$HOME/anaconda3/envs/$FFMPEG_ENV_NAME" ]; then
+        CONDA_FFMPEG_PREFIX="$HOME/anaconda3/envs/$FFMPEG_ENV_NAME"
+    else
+        fail "couldn't auto-locate conda env '$FFMPEG_ENV_NAME'. set CONDA_FFMPEG_PREFIX=/path/to/envs/$FFMPEG_ENV_NAME"
+    fi
+fi
+[ -d "$CONDA_FFMPEG_PREFIX/lib" ] || fail "no $CONDA_FFMPEG_PREFIX/lib"
+ls "$CONDA_FFMPEG_PREFIX/lib"/libavformat.so* >/dev/null 2>&1 \
+    || fail "$CONDA_FFMPEG_PREFIX/lib doesn't contain libavformat — wrong env?"
+log "ffmpeg conda env: $CONDA_FFMPEG_PREFIX"
 
 # ── uv
-if ! command -v uv &>/dev/null; then
-    log "installing uv"
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
-fi
+command -v uv &>/dev/null || fail "uv not found in PATH"
 log "uv: $(uv --version)"
 
 # ── uv sync — flash-attn wheel (~395MB) frequently times out, retry up to 3x.
@@ -47,12 +54,16 @@ done
 log "installing gr00t in editable mode"
 uv pip install -e .
 
-# ── verify the dataset is present (137MB, not in git — must be transferred separately)
+# ── persist conda-ffmpeg path so train.sh can pick it up
+echo "$CONDA_FFMPEG_PREFIX" > "$REPO_ROOT/examples/realworld/.ffmpeg_prefix"
+log "wrote examples/realworld/.ffmpeg_prefix"
+
+# ── dataset presence check (137MB, not in git — fetch from gdrive)
 DATASET="$REPO_ROOT/examples/realworld/realworld_lerobot"
 if [ ! -d "$DATASET/data" ] || [ ! -f "$DATASET/meta/modality.json" ] || [ ! -f "$DATASET/meta/stats.json" ]; then
     warn "dataset not found at $DATASET"
-    warn "  transfer it from the source machine, e.g.:"
-    warn "    rsync -avh --info=progress2 source:/path/to/realworld_lerobot/ $DATASET/"
+    warn "  fetch it from Google Drive:"
+    warn "    rclone copy gdrive:Projects/PointAction/realworld_lerobot_gr00t/ $DATASET/ --transfers 8 --progress"
 else
     ok "dataset present: $(du -sh "$DATASET" | cut -f1) at $DATASET"
 fi
